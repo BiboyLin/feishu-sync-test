@@ -1,8 +1,99 @@
-- name: Run
-  env:
-    FEISHU_APP_ID:     ${{ secrets.FEISHU_APP_ID }}
-    FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-    FEISHU_APP_TOKEN:  ${{ secrets.FEISHU_APP_TOKEN }}
-    FEISHU_TABLE_ID:   ${{ secrets.FEISHU_TABLE_ID }}
-  run: |
-    python scripts/issue_to_feishu_ids.py
+name: Issue → Feishu (field_name)
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      标题:
+        description: "飞书：标题（手动触发时用；issues 事件会从正文解析）"
+        required: false
+        type: string
+      优先级:
+        description: "P0/P1/P2/P3"
+        required: false
+        type: string
+      需求类型:
+        description: "BUG/Feature/Enhancement"
+        required: false
+        type: string
+      bug来源（可选）:
+        description: "用户反馈/内部测试/线上监控"
+        required: false
+        type: string
+      IssueURL:
+        description: "覆盖用（一般留空；issues 事件会自动获取）"
+        required: false
+        type: string
+      debug:
+        description: "打印事件载荷与解析结果（true/false）"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # 可选：安全打印事件载荷，避免把正文当命令执行
+      - name: (Debug) Show event payload safely
+        if: ${{ github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' && false || inputs.debug == 'true') }}
+        run: |
+          python - <<'PY'
+          import os, json
+          p = os.environ.get("GITHUB_EVENT_PATH")
+          print("== GITHUB_EVENT_PATH:", p)
+          if p and os.path.exists(p):
+            j = json.load(open(p, encoding="utf-8"))
+            # 只打印关键信息，避免日志过长
+            safe = {
+              "event": os.environ.get("GITHUB_EVENT_NAME"),
+              "issue_title": j.get("issue", {}).get("title"),
+              "issue_html_url": j.get("issue", {}).get("html_url"),
+              "body_preview": (j.get("issue", {}).get("body") or "")[:500]
+            }
+            print(json.dumps(safe, ensure_ascii=False, indent=2))
+          else:
+            print("No event file found.")
+          PY
+
+      - name: Run sync to Feishu
+        env:
+          FEISHU_APP_ID:     ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_TOKEN:  ${{ secrets.FEISHU_APP_TOKEN }}
+          FEISHU_TABLE_ID:   ${{ secrets.FEISHU_TABLE_ID }}
+
+          # 手动触发时，这些输入会被脚本读取（非必填）
+          标题:               ${{ inputs.标题 }}
+          优先级:             ${{ inputs.优先级 }}
+          需求类型:           ${{ inputs.需求类型 }}
+          bug来源（可选）:     ${{ inputs['bug来源（可选）'] }}
+          IssueURL:           ${{ inputs.IssueURL }}
+        run: |
+          python scripts/issue_to_feishu_ids.py
+
+      # 可选：安全打印解析后的字段（脚本内部也会打印）
+      - name: (Debug) Check last run status
+        if: ${{ failure() }}
+        run: |
+          echo "❌ 同步失败，请查看上一步日志中的 upsert error 返回体。"
