@@ -84,9 +84,9 @@ jobs:
           FEISHU_TABLE_ID:   ${{ secrets.FEISHU_TABLE_ID }}
 
           # 手动触发时，这些输入会被脚本读取（非必填）
-          标题:               ${{ inputs.标题 }}
-          优先级:             ${{ inputs.优先级 }}
-          需求类型:           ${{ inputs.需求类型 }}
+          标题:               ${{ inputs['标题'] }}
+          优先级:             ${{ inputs['优先级'] }}
+          需求类型:           ${{ inputs['需求类型'] }}
           bug来源（可选）:     ${{ inputs['bug来源（可选）'] }}
           IssueURL:           ${{ inputs.IssueURL }}
         run: |
