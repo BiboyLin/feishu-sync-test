@@ -1,0 +1,91 @@
+name: Issue to Feishu Bitable
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  sync-to-feishu:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.body, '需求类型') && contains(github.event.issue.body, '优先级')
+
+    steps:
+      - name: Get tenant access token
+        id: get_token
+        run: |
+          response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d '{
+              "app_id": "${{ secrets.FEISHU_APP_ID }}",
+              "app_secret": "${{ secrets.FEISHU_APP_SECRET }}"
+            }' \
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
+
+          tenant_access_token=$(echo "$response" | jq -r '.tenant_access_token')
+
+          if [ "$tenant_access_token" = "null" ]; then
+            echo "Failed to get tenant access token"
+            echo "$response"
+            exit 1
+          fi
+
+          echo "tenant_access_token=$tenant_access_token" >> $GITHUB_OUTPUT
+
+      - name: Parse issue data
+        id: parse_issue
+        run: |
+          title="${{ github.event.issue.title }}"
+          url="${{ github.event.issue.html_url }}"
+          body="${{ github.event.issue.body }}"
+
+          # 提取需求类型
+          requirement_type=$(echo "$body" | grep -A 1 "## 需求类型" | tail -n 1 | xargs)
+
+          # 提取优先级
+          priority=$(echo "$body" | grep -A 1 "## 优先级" | tail -n 1 | xargs)
+
+          # 提取bug来源（可选）
+          bug_source=$(echo "$body" | grep -A 1 "## bug来源（可选）" | tail -n 1 | xargs)
+
+          echo "title=$title" >> $GITHUB_OUTPUT
+          echo "url=$url" >> $GITHUB_OUTPUT
+          echo "requirement_type=$requirement_type" >> $GITHUB_OUTPUT
+          echo "priority=$priority" >> $GITHUB_OUTPUT
+          echo "bug_source=$bug_source" >> $GITHUB_OUTPUT
+
+      - name: Create record in Feishu Bitable
+        run: |
+          tenant_access_token="${{ steps.get_token.outputs.tenant_access_token }}"
+          app_token="${{ secrets.FEISHU_APP_TOKEN }}"
+          table_id="${{ secrets.FEISHU_TABLE_ID }}"
+
+          payload=$(cat << EOF
+          {
+            "fields": {
+              "标题": "${{ steps.parse_issue.outputs.title }}",
+              "IssueURL": "${{ steps.parse_issue.outputs.url }}",
+              "优先级": "${{ steps.parse_issue.outputs.priority }}",
+              "需求类型": "${{ steps.parse_issue.outputs.requirement_type }}"
+              ${{ steps.parse_issue.outputs.bug_source != '' && format(',"bug来源（可选）": "%s"', steps.parse_issue.outputs.bug_source) || '' }}
+            }
+          }
+          EOF
+          )
+
+          response=$(curl -s -X POST \
+            -H "Authorization: Bearer $tenant_access_token" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "https://open.feishu.cn/open-apis/bitable/v1/apps/$app_token/tables/$table_id/records")
+
+          echo "Response: $response"
+
+          # 检查响应
+          code=$(echo "$response" | jq -r '.code // -1')
+          if [ "$code" != "0" ]; then
+            echo "Failed to create record in Feishu Bitable"
+            echo "$response"
+            exit 1
+          fi
+
+          echo "Successfully created record in Feishu Bitable"

@@ -1,0 +1,8 @@
+{
+  "action": "opened",
+  "issue": {
+    "title": "[需求] 移动端登录页异常跳转",
+    "html_url": "https://github.com/you/repo/issues/123",
+    "body": "## 标题\ntoken修复自测（field_id）\n\n## 优先级\nP1\n\n## 需求类型\nBUG\n\n## bug来源（可选）\n用户反馈\n"
+  }
+}
